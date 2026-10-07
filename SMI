@@ -1,0 +1,236 @@
+// ============================================================
+// MONTHLY SOIL MOISTURE INDEX (SMI)
+// ONE MONTH AT A TIME
+// Dataset: NASA SMAP L4 - 9 km
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. YOUR AOI
+// ------------------------------------------------------------
+
+// Import your area and name it "aoi"
+// Example:
+// var aoi = geometry;
+
+
+Map.centerObject(aoi, 9);
+Map.addLayer(aoi, {}, 'AOI');
+
+
+
+// ------------------------------------------------------------
+// 2. CHOOSE THE MONTH
+// ------------------------------------------------------------
+
+// CHANGE THESE TWO DATES ONLY
+
+var startDate = '2026-07-01';
+var endDate   = '2026-08-01';
+
+
+// ------------------------------------------------------------
+// 3. LOAD SMAP DATA
+// ------------------------------------------------------------
+
+var smap = ee.ImageCollection('NASA/SMAP/SPL4SMGP/008')
+  .filterDate(startDate, endDate)
+  .filterBounds(aoi)
+  .select('sm_surface');
+
+print('SMAP images for this month:', smap.size());
+
+
+// ------------------------------------------------------------
+// 4. CALCULATE MONTHLY MEAN SOIL MOISTURE
+// ------------------------------------------------------------
+
+var monthlySM = smap
+  .mean()
+  .clip(aoi);
+
+print('Monthly Soil Moisture:', monthlySM);
+
+
+// ------------------------------------------------------------
+// 5. CALCULATE MINIMUM AND MAXIMUM
+// ------------------------------------------------------------
+
+// These are calculated spatially within your AOI.
+
+var stats = monthlySM.reduceRegion({
+  reducer: ee.Reducer.minMax(),
+  geometry: aoi,
+  scale: 9000,
+  maxPixels: 1e8
+});
+
+print('Min / Max Soil Moisture:', stats);
+
+
+// ------------------------------------------------------------
+// 6. CALCULATE SMI
+// ------------------------------------------------------------
+
+var minSM = ee.Number(stats.get('sm_surface_min'));
+var maxSM = ee.Number(stats.get('sm_surface_max'));
+
+var SMI = monthlySM
+  .subtract(minSM)
+  .divide(maxSM.subtract(minSM))
+  .rename('SMI')
+  .clip(aoi);
+
+
+// ------------------------------------------------------------
+// 7. DISPLAY SOIL MOISTURE
+// ------------------------------------------------------------
+
+Map.addLayer(
+  monthlySM,
+  {
+    min: 0,
+    max: 0.5,
+    palette: [
+      'brown',
+      'yellow',
+      'lightblue',
+      'blue'
+    ]
+  },
+  'Monthly Soil Moisture'
+);
+
+
+// ------------------------------------------------------------
+// 8. DISPLAY SMI
+// ------------------------------------------------------------
+
+Map.addLayer(
+  SMI,
+  {
+    min: 0,
+    max: 1,
+    palette: [
+      '8c510a',
+      'd8b365',
+      'f6e8c3',
+      'c7eae5',
+      '5ab4ac',
+      '01665e'
+    ]
+  },
+  'Monthly SMI'
+);
+
+Map.addLayer(
+  GERD.style({
+    color: 'FF0000',
+    fillColor: '00000000',
+    width: 1
+  }),
+  {},
+  'GERD Boundary'
+);
+// ------------------------------------------------------------
+// 9. GET MEAN VALUES FOR YOUR AOI
+// ------------------------------------------------------------
+
+var meanValues = SMI.addBands(monthlySM).reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: aoi,
+  scale: 9000,
+  maxPixels: 1e8
+});
+
+print('AOI Mean Values:', meanValues);
+
+// ============================================================
+// SMI LEGEND
+// ============================================================
+
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+
+// Legend title
+var legendTitle = ui.Label({
+  value: 'Soil Moisture Index (SMI)',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '14px',
+    margin: '0 0 8px 0'
+  }
+});
+
+legend.add(legendTitle);
+
+
+// Colors used for SMI
+var colors = [
+  '8c510a',
+  'd8b365',
+  'f6e8c3',
+  'c7eae5',
+  '5ab4ac',
+  '01665e'
+];
+
+
+// Corresponding values
+var labels = [
+  '0.0  Very Dry',
+  '0.2  Dry',
+  '0.4  Moderate',
+  '0.6  Wet',
+  '0.8  Very Wet',
+  '1.0  Very Wet'
+];
+
+
+// Create legend rows
+for (var i = 0; i < colors.length; i++) {
+
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: '#' + colors[i],
+      padding: '8px',
+      margin: '0 5px 4px 0'
+    }
+  });
+
+  var description = ui.Label({
+    value: labels[i],
+    style: {
+      margin: '0 0 4px 0'
+    }
+  });
+
+  var row = ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+
+  legend.add(row);
+}
+
+
+// Add legend to map
+Map.add(legend);
+// ------------------------------------------------------------
+// 10. EXPORT SMI RASTER
+// ------------------------------------------------------------
+
+Export.image.toDrive({
+  image: SMI,
+  description: 'SMI_2025_01',
+  folder: 'GEE_SMI',
+  fileNamePrefix: 'SMI_2025_01',
+  region: aoi,
+  scale: 9000,
+  maxPixels: 1e8
+});
